@@ -95,7 +95,7 @@
             {% endif %}
           </tr>
         {% endfor %}
-      </table>
+
     </div>
     <p class="note">Google scores require a PageSpeed key and may vary between runs. Image transfers cover sampled images, not total page weight.</p>
 
@@ -169,7 +169,7 @@
         <ul>
           {% for fix, path in pr.applied %}<li>{{ fix.issue }} — {{ path }}</li>{% endfor %}
           {% for image in pr.images %}<li>{{ image.path }}: {{ image.old_kb }} KB → {{ image.new_kb }} KB</li>{% endfor %}
-          {% for attribute in pr.attributes %}<li>{{ attribute }}</li>{% endfor %}
+          {% for attribute, path in pr.attributes %}<li>{{ attribute }} in {{ path }}</li>{% endfor %}
           {% for fix, reason in pr.skipped %}<li>Skipped {{ fix.issue }}: {{ reason }}</li>{% endfor %}
         </ul>
       </div>

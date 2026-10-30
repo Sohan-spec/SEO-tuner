@@ -15,3 +15,9 @@ screenshots/
 *.egg-info/
 dist/
 build/
+node_modules/
+# seofixer CLI: per-site baselines and undo backups
+.seofixer/
+# demo video render leftovers
+demo_video/frames/
+demo_video/still_*.png

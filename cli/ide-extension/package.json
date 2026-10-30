@@ -1,0 +1,10 @@
+{
+  "name": "seofixer-preview",
+  "publisher": "seofixer",
+  "displayName": "seofixer preview",
+  "description": "Lets the seofixer CLI open its local preview in the editor's built-in browser.",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.80.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onUri"]
+}
