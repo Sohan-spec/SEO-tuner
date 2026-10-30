@@ -5,6 +5,7 @@ The prompts and tool definitions are in prompts.py."""
 
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
@@ -81,6 +82,16 @@ def search_guidelines(query):
             for text, meta in zip(results["documents"][0], results["metadatas"][0])]
 
 
+UNSAFE = re.compile(r"<script|<iframe|<style|javascript:|\son\w+\s*=", re.I)
+HEAD_TAG = re.compile(r'</title>\s*<meta name="(description|viewport)" content="[^"<>]*"\s*/?>')
+
+
+def adds_missing_head_tag(replace, page_data):
+    """After </title> only a meta description or viewport tag that the page lacks may be added."""
+    tag = HEAD_TAG.fullmatch(replace)
+    return bool(tag) and not (page_data["meta_description"] if tag[1] == "description" else page_data["has_viewport"])
+
+
 def validate_report(report, sources, page_data):
     if not isinstance(report, dict) or not isinstance(report.get("summary"), str):
         raise ValueError("The agent returned an invalid report.")
@@ -100,13 +111,15 @@ def validate_report(report, sources, page_data):
             fix["source"] = ""
             fix["find"] = fix["replace"] = ""
         # Only reviewed, page-derived text may become an automatic edit.
+        # Body text needs 20+ characters: a short phrase could match an unrelated spot in the repo.
         find = fix["find"]
-        known = find in page_data["body_text"] or find == page_data["title"] or find == page_data["meta_description"]
+        known = (len(find) >= 20 and find in page_data["body_text"]) or find in (page_data["title"], page_data["meta_description"])
         known = known or any(find == text for level, text in page_data["headings"])
-        known = known or (find == "</title>" and bool(page_data["title"]))
+        known = known or (find == "</title>" and bool(page_data["title"]) and adds_missing_head_tag(fix["replace"], page_data))
         known = known or any(find in (f'src="{src}"', f"src='{src}'")
                              for src in page_data["images_missing_alt"])
-        if not known:
+        # The new text goes into the repo, so it may never carry code (the audited page could ask for it).
+        if not known or UNSAFE.search(fix["replace"]):
             fix["find"] = fix["replace"] = ""
         clean.append(fix)
     return {"score": score, "summary": report["summary"][:2000], "fixes": clean}
@@ -115,7 +128,7 @@ def validate_report(report, sources, page_data):
 def run_agent(specialist, page_data, issues):
     """Each specialist searches guidance, then submits a validated report."""
     import anthropic
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=90, max_retries=1)
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=120, max_retries=1)
     page_slice = {field: page_data[field] for field in specialist["fields"]}
     if specialist["body_chars"]:
         page_slice["body_text"] = page_data["body_text"][:specialist["body_chars"]]
@@ -128,16 +141,11 @@ def run_agent(specialist, page_data, issues):
     turn = resumes = 0
 
     while turn < settings.AGENT_MAX_TURNS:
-        # Search first; force completion on the last turn.
-        tool_choice = {"type": "auto"}
-        if turn == 0:
-            tool_choice = {"type": "tool", "name": "search_seo_guidelines"}
-        elif turn == settings.AGENT_MAX_TURNS - 1:
-            tool_choice = {"type": "tool", "name": "submit_report"}
+        # No forced tool_choice: Opus 5.5 rejects it, so the prompt and tool results steer the order.
         try:
             response = client.messages.create(
                 model=settings.LLM_MODEL, max_tokens=settings.LLM_MAX_TOKENS,
-                system=system_prompt, tools=tools, tool_choice=tool_choice, messages=messages,
+                system=system_prompt, tools=tools, messages=messages,
             )
         except (anthropic.BadRequestError, anthropic.PermissionDeniedError):
             if prompts.WEB_SEARCH_TOOL not in tools:
@@ -163,9 +171,11 @@ def run_agent(specialist, page_data, issues):
             if block.type != "tool_use":
                 continue
             if block.name == "submit_report":
-                if not searches:
-                    raise ValueError("The agent did not search the knowledge base.")
-                return validate_report(block.input, sources, page_data), usage
+                if searches:
+                    return validate_report(block.input, sources, page_data), usage
+                tool_results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": True,
+                                     "content": "Search with search_seo_guidelines before submitting."})
+                continue
             query = block.input.get("query")
             if block.name != "search_seo_guidelines" or not isinstance(query, str) or not query.strip():
                 # Let the agent correct itself instead of failing the whole report.
@@ -177,7 +187,9 @@ def run_agent(specialist, page_data, issues):
             sources.update(p["source"] for p in passages)
             tool_results.append({"type": "tool_result", "tool_use_id": block.id,
                                  "content": json.dumps(passages)})
-        messages.append({"role": "user", "content": tool_results or prompts.REPORT_REMINDER})
+        if not tool_results or turn == settings.AGENT_MAX_TURNS - 1:  # next turn is the last one
+            tool_results.append({"type": "text", "text": prompts.REPORT_REMINDER})
+        messages.append({"role": "user", "content": tool_results})
     raise ValueError("The agent did not finish its report.")
 
 

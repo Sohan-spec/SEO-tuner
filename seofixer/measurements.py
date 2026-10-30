@@ -98,6 +98,7 @@ def measure(url):
         google_job = pool.submit(google_scores, url)  # Google runs while we read the page
         page = audit.fetch_page(url)
         page_data = audit.extract_page_data(page["html"], page["url"])
+        page_data.update(audit.read_robots(page["url"]))
         issues = audit.run_checks(page_data)
         perf_items = find_performance_issues(page["images"])
         google = google_job.result()

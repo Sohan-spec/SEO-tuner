@@ -171,7 +171,9 @@ def create_pull_request(repo, fixes, page_url, perf_items):
             file_path = repo_path_for(item["url"], image_paths)
             if file_path and file_path not in new_images:
                 original = download(file_path)
-                smaller = optimize_image(original, item["needed_width"] if item["oversized"] else None)
+                # Resize only an image this page alone uses; another page may show it larger.
+                used_once = sum(f["text"].count(file_path.rsplit("/", 1)[-1]) for f in files.values()) == 1
+                smaller = optimize_image(original, item["needed_width"] if item["oversized"] and used_once else None)
                 if smaller:
                     new_images[file_path] = smaller
                     result["images"].append({"path": file_path, "old_kb": len(original) // 1024,

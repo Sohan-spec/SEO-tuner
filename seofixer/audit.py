@@ -4,7 +4,9 @@ import re
 import socket
 from ipaddress import ip_address
 from urllib.parse import urljoin, urlparse
+from urllib.robotparser import RobotFileParser
 
+import requests
 from bs4 import BeautifulSoup
 from django.conf import settings
 
@@ -12,7 +14,13 @@ from django.conf import settings
 FOLD = 800  # pixels visible without scrolling in our 1280x800 browser
 
 
-TOTAL_CHECKS = 11  # number of rules below, used for "rule checks passed"
+TOTAL_CHECKS = 14  # number of rules below, used for "rule checks passed"
+
+
+# Blocking these hides the page from that engine's results and AI answers.
+SEARCH_BOTS = ["Googlebot", "Bingbot", "OAI-SearchBot", "Claude-SearchBot", "PerplexityBot"]
+# Blocking these only stops AI training; search is not affected.
+TRAINING_BOTS = ["GPTBot", "ClaudeBot", "Google-Extended"]
 
 
 SCROLL_TO_BOTTOM_JS = """async () => {
@@ -55,18 +63,18 @@ def validate_url(url):
 
 def fetch_page(url):
     """Render the page, measure images at two widths, and take a screenshot."""
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import Error, sync_playwright
     validate_url(url)
     image_bytes = {}
 
     def allow_public_request(route):
         try:
             validate_url(route.request.url)
-        except ValueError:
+            # Do not follow redirects inside fetch: the browser routes each next URL.
+            response = route.fetch(max_redirects=0, timeout=30000)
+        except (ValueError, Error):  # a blocked or broken file must not stall the whole page
             route.abort()
             return
-        # Do not follow redirects inside fetch: the browser routes each next URL.
-        response = route.fetch(max_redirects=0, timeout=30000)
         if response.headers.get("content-type", "").startswith("image/"):
             image_bytes[route.request.url] = len(response.body())
         route.fulfill(response=response)
@@ -105,11 +113,12 @@ def extract_page_data(rendered_html, url):
 
     # Read structured data before we throw scripts away.
     structured_data_blocks = len(soup.find_all("script", type="application/ld+json"))
+    data_nosnippet = len(soup.find_all(attrs={"data-nosnippet": True}))
     for tag in soup(["script", "style", "noscript", "svg", "iframe", "template"]):
         tag.decompose()
 
     def meta(name):
-        tag = soup.find("meta", attrs={"name": name})
+        tag = soup.find("meta", attrs={"name": re.compile(f"^{name}$", re.I)})  # "Description" counts too
         return tag.get("content") if tag else None
 
     canonical = soup.find("link", rel="canonical")
@@ -128,6 +137,7 @@ def extract_page_data(rendered_html, url):
         "has_viewport": meta("viewport") is not None,
         "canonical": canonical.get("href") if canonical else None,
         "structured_data_blocks": structured_data_blocks,
+        "data_nosnippet": data_nosnippet,
         "headings": [[h.name, h.get_text(" ", strip=True)[:120]]
                      for h in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"])],
         "image_count": len(images),
@@ -144,6 +154,22 @@ def extract_page_data(rendered_html, url):
         "word_count": len(body_text.split()),
         "body_text": body_text[:settings.MAX_BODY_CHARS],
     }
+
+
+def read_robots(url):
+    """Which crawlers robots.txt blocks from this page. Empty when robots.txt cannot be read."""
+    try:
+        response = requests.get(urljoin(url, "/robots.txt"), timeout=10, allow_redirects=False)
+    except requests.RequestException:
+        return {}
+    if response.is_redirect:  # not followed (it could point anywhere), so the answer is unknown
+        return {}
+    parser = RobotFileParser()
+    parser.parse(response.text.splitlines() if response.status_code == 200 else [])  # no robots.txt: all allowed
+    # shortcut: Python's parser applies the first matching rule, Google the longest; mixed Allow/Disallow can differ.
+    blocked = lambda bots: [bot for bot in bots if not parser.can_fetch(bot, url)]
+    return {"blocked_search_bots": blocked(SEARCH_BOTS), "blocked_training_bots": blocked(TRAINING_BOTS),
+            "sitemap_listed": bool(parser.site_maps())}
 
 
 def run_checks(data):
@@ -169,8 +195,16 @@ def run_checks(data):
         add("technical", "medium", "Missing viewport meta tag; check the mobile layout.")
     if not data["canonical"]:
         add("technical", "low", "No canonical link; review if duplicate URLs need consolidation.")
-    if "noindex" in re.split(r"[\s,]+", (data["meta_robots"] or "").lower()):
+    robots = re.split(r"[\s,]+", (data["meta_robots"] or "").lower())
+    if "noindex" in robots:
         add("technical", "high", "Page has noindex. Confirm whether exclusion from search is intentional.")
+    if "nosnippet" in robots or "max-snippet:0" in robots or data.get("data_nosnippet"):
+        add("technical", "medium", "Snippet limits (nosnippet, max-snippet or data-nosnippet) stop Google and its AI answers from quoting this page.")
+    if data.get("blocked_search_bots"):
+        add("technical", "high" if "Googlebot" in data["blocked_search_bots"] else "medium",
+            "robots.txt blocks " + ", ".join(data["blocked_search_bots"]) + ": this page cannot appear in their search results or AI answers.")
+    if data.get("sitemap_listed") is False:
+        add("technical", "low", "robots.txt does not list a sitemap; add a 'Sitemap:' line so crawlers find every page.")
     if data["vague_link_texts"]:
         add("technical", "low", "Some links use vague text: " + ", ".join(data["vague_link_texts"]))
     if not data["internal_links"]:

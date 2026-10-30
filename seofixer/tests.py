@@ -68,6 +68,24 @@ class ParsingTests(SimpleTestCase):
             data = audit.extract_page_data(HTML.replace('<head>', f'<head><meta name="robots" content="{robots}">'), 'https://example.com/')
             self.assertEqual(any('noindex' in i['detail'] for i in audit.run_checks(data)), flagged)
 
+    @patch('seofixer.audit.requests.get')
+    def test_robots_separates_search_from_training_bots(self, get):
+        get.return_value = Mock(status_code=200, is_redirect=False,
+                                text='User-agent: GPTBot\nDisallow: /\n\nUser-agent: PerplexityBot\nDisallow: /\n')
+        info = audit.read_robots('https://example.com/')
+        self.assertEqual(info, {'blocked_search_bots': ['PerplexityBot'], 'blocked_training_bots': ['GPTBot'], 'sitemap_listed': False})
+        html = HTML.replace('<head>', '<head><meta name="robots" content="nosnippet">')
+        details = [i['detail'] for i in audit.run_checks({**audit.extract_page_data(html, 'https://example.com/'), **info})]
+        self.assertTrue(any('PerplexityBot' in d and 'GPTBot' not in d for d in details))
+        self.assertTrue(any('sitemap' in d for d in details))
+        self.assertTrue(any('nosnippet' in d for d in details))
+
+    def test_meta_names_are_case_insensitive(self):
+        html = HTML.replace('name="description"', 'name="Description"').replace('name="viewport"', 'name="Viewport"')
+        data = audit.extract_page_data(html, 'https://example.com/')
+        self.assertEqual(data['meta_description'], 'Buy and repair student bicycles.')
+        self.assertTrue(data['has_viewport'])
+
     def test_chunking_keeps_overlap_and_end(self):
         words = [f'word{i}' for i in range(250)]
         chunks = ai.chunk_text(' '.join(words))
@@ -121,14 +139,16 @@ class AgentTests(SimpleTestCase):
     @patch('seofixer.ai.search_guidelines', return_value=[{'source': SOURCE, 'text': 'Write descriptive titles.'}])
     @patch('anthropic.Anthropic')
     def test_agent_searches_then_validates_report(self, anthropic, search):
+        submit = model_reply('submit_report', {'score': 80, 'summary': 'Improve the title.', 'fixes': [fix()]})
         anthropic.return_value.messages.create.side_effect = [
+            submit,  # reporting before searching gets an error back, not a crash
             model_reply('search_seo_guidelines', {'query': 'good page titles'}),
-            model_reply('submit_report', {'score': 80, 'summary': 'Improve the title.', 'fixes': [fix()]}),
+            submit,
         ]
         report, usage = ai.run_agent(prompts.SPECIALISTS[0], self.page, [])
         self.assertEqual(report['fixes'][0]['source'], SOURCE)
-        self.assertEqual(usage, {'input_tokens': 40, 'output_tokens': 20, 'turns': 2})
-        self.assertEqual(anthropic.return_value.messages.create.call_args_list[0].kwargs['tool_choice']['name'], 'search_seo_guidelines')
+        self.assertEqual(usage, {'input_tokens': 60, 'output_tokens': 30, 'turns': 3})
+        self.assertNotIn('tool_choice', anthropic.return_value.messages.create.call_args_list[0].kwargs)
 
     def test_fabricated_citations_and_find_text_cannot_be_auto_applied(self):
         proposed = fix()
@@ -142,6 +162,15 @@ class AgentTests(SimpleTestCase):
             ai.validate_report({'score': 500, 'summary': 'Bad.', 'fixes': []}, {SOURCE}, self.page)
         result = ai.validate_report({'score': 70, 'summary': 'Review.', 'fixes': [{'issue': 'partial'}, fix()]}, {SOURCE}, self.page)
         self.assertEqual([f['issue'] for f in result['fixes']], ['Improve the title'])
+        # Short body text, code in the new text, and a second meta description never become edits.
+        for proposed in [fix(find='repair bicycles'), fix(replace='Bikes<script>alert(1)</script>'),
+                         fix(find='</title>', replace='</title><meta name="description" content="Bikes.">')]:
+            result = ai.validate_report({'score': 70, 'summary': 'Review.', 'fixes': [proposed]}, {SOURCE}, self.page)
+            self.assertEqual(result['fixes'][0]['find'], '')
+        no_meta = audit.extract_page_data(HTML.replace('<meta name="description" content="Buy and repair student bicycles.">', ''), 'https://example.com/')
+        added = fix(find='</title>', replace='</title>\n<meta name="description" content="Student bike repairs.">')
+        result = ai.validate_report({'score': 70, 'summary': 'Review.', 'fixes': [added]}, {SOURCE}, no_meta)
+        self.assertEqual(result['fixes'][0]['find'], '</title>')
 
     @override_settings(ANTHROPIC_API_KEY='test')
     @patch('seofixer.ai.search_guidelines', return_value=[])
@@ -159,12 +188,11 @@ class AgentTests(SimpleTestCase):
             paused,
             model_reply('submit_report', {'score': 80, 'summary': 'Improve the title.', 'fixes': fixes}),
         ]
-        with override_settings(AGENT_MAX_TURNS=4):
+        with override_settings(AGENT_MAX_TURNS=3):  # 4 calls in 3 turns: the resume did not use up a turn
             report, usage = ai.run_agent(prompts.SPECIALISTS[0], self.page, [])
         self.assertEqual([(f['source'], f['find']) for f in report['fixes']], [(web, 'Bikes for students'), ('', '')])
         self.assertTrue(create.call_args_list[0].kwargs['tools'][-1]['type'].startswith('web_search'))
         self.assertTrue(create.call_args_list[1].kwargs['messages'][2]['content'][0]['is_error'])
-        self.assertEqual(create.call_args_list[3].kwargs['tool_choice'], {'type': 'auto'})  # resume did not use up a turn
         self.assertEqual([m['role'] for m in create.call_args_list[3].kwargs['messages']][-2:], ['assistant', 'assistant'])
 
     @override_settings(ANTHROPIC_API_KEY='test')
@@ -339,6 +367,22 @@ class GitHubTests(SimpleTestCase):
         self.assertTrue(calls[-1][2]['json']['draft'])
         self.assertEqual(calls[-1][2]['json']['base'], 'main')
         self.assertFalse(any(m == 'PATCH' for m,p,k in calls))
+
+    @patch('seofixer.github.optimize_image', return_value=None)
+    @patch('seofixer.github.github')
+    def test_shared_image_is_compressed_but_not_resized(self, github, optimize):
+        def respond(method, endpoint, **kwargs):
+            if endpoint == '/repos/owner/repo': return {'default_branch': 'main'}
+            if '/git/ref/heads/' in endpoint: return {'object': {'sha': 'base'}}
+            if '/git/trees/' in endpoint:
+                return {'sha': 'tree', 'tree': [{'path': p, 'type': 'blob', 'mode': '100644', 'size': 50, 'sha': p}
+                                                for p in ('index.html', 'about.html', 'photo.png')]}
+            return {'content': base64.b64encode(b'<img src="/photo.png">').decode()}  # both pages use the photo
+        github.side_effect = respond
+        item = {'url': 'https://example.com/photo.png', 'src': '/photo.png',
+                'lazy': False, 'priority': False, 'oversized': True, 'heavy': False, 'needed_width': 400}
+        repo.create_pull_request('owner/repo', [], 'https://example.com/', [item])
+        self.assertIsNone(optimize.call_args.args[1])  # no target width: compress only
 
     @patch('seofixer.github.github')
     def test_truncated_repo_tree_cannot_be_edited(self, github):

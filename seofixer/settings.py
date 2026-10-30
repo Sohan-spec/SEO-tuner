@@ -51,8 +51,8 @@ USE_TZ = True
 ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '')
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
 PAGESPEED_API_KEY = os.getenv('PAGESPEED_API_KEY', '')
-LLM_MODEL = os.getenv('LLM_MODEL', 'claude-haiku-5-5')
-LLM_MAX_TOKENS = 400000
+LLM_MODEL = os.getenv('LLM_MODEL', 'claude-opus-5-5')
+LLM_MAX_TOKENS = 16000  # Opus 5.5 always thinks, and thinking counts toward this limit00
 AGENT_MAX_TURNS = 3
 MAX_FIXES = 10
 MAX_BODY_CHARS = 50000
@@ -75,6 +75,25 @@ SEO_SOURCES = [
     'https://developers.google.com/search/docs/crawling-indexing/robots-meta-tag',
     'https://developers.google.com/search/docs/crawling-indexing/mobile/mobile-sites-mobile-first-indexing',
     'https://developers.google.com/search/docs/essentials/spam-policies',
+    # AI Overviews, AI Mode and AI assistants (checked 2026-10-30)
+    'https://developers.google.com/search/docs/fundamentals/ai-optimization-guide',
+    'https://developers.google.com/search/docs/appearance/ai-features',
+    'https://developers.google.com/search/docs/fundamentals/using-gen-ai-content',
+    'https://support.google.com/webmasters/answer/16908024',
+    'https://developers.google.com/crawling/docs/crawlers-fetchers/google-common-crawlers',
+    'https://developers.openai.com/api/docs/bots',
+    'https://support.claude.com/en/articles/8896518-does-anthropic-crawl-data-from-the-web-and-how-can-site-owners-block-the-crawler',
+    'https://docs.perplexity.ai/docs/resources/perplexity-crawlers',
+    # Technical basics and local businesses
+    'https://developers.google.com/search/docs/essentials/technical',
+    'https://developers.google.com/search/docs/appearance/core-web-vitals',
+    'https://developers.google.com/search/docs/crawling-indexing/robots/intro',
+    'https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap',
+    'https://developers.google.com/search/docs/crawling-indexing/javascript/javascript-seo-basics',
+    'https://developers.google.com/search/docs/appearance/structured-data/sd-policies',
+    'https://developers.google.com/search/docs/appearance/structured-data/local-business',
+    'https://support.google.com/business/answer/7091',
 ]
 # Agents may web search these sites (subdomains included) when the local guidance falls short.
-WEB_SEARCH_DOMAINS = ['developers.google.com', 'web.dev', 'schema.org', 'developer.mozilla.org', 'w3.org']
+WEB_SEARCH_DOMAINS = ['developers.google.com', 'web.dev', 'schema.org', 'developer.mozilla.org', 'w3.org',
+                      'support.google.com', 'bing.com', 'developers.openai.com', 'support.claude.com', 'docs.perplexity.ai']

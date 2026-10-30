@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>seofixer · 45s demo</title>
+<style>
+:root{--bg:#0c0c0c;--bg1:#121212;--bg2:#161616;--line:#232323;--fg:#d4d4d4;--hi:#f2f2f2;--dim:#787878;--faint:#474747;
+--ok:#8ec07c;--bad:#e06c6c;--warn:#d8b25a;--str:#c9b28a;
+--mono:"SF Mono",Menlo,Consolas,monospace;--ui:-apple-system,"SF Pro Text",system-ui,sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#000;overflow:hidden;width:100%;height:100%}
+#stage{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:hidden;background:#000;transform-origin:0 0}
+#ide{position:absolute;left:0;top:0;width:1920px;height:1080px;background:var(--bg);transform-origin:0 0;color:var(--fg);font-family:var(--ui)}
+.abs{position:absolute}
+/* chrome */
+#titlebar{left:0;top:0;width:1920px;height:40px;background:var(--bg1);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 18px;gap:9px}
+#titlebar i{width:12px;height:12px;border-radius:50%;background:#2e2e2e}
+#titlebar span{position:absolute;left:0;right:0;text-align:center;font:500 13px var(--ui);color:var(--dim)}
+#activity{left:0;top:40px;width:56px;bottom:26px;background:var(--bg1);border-right:1px solid var(--line)}
+#activity b{position:absolute;left:17px;width:22px;height:22px;border:1.5px solid #3a3a3a;border-radius:5px}
+#side{left:56px;top:40px;width:300px;bottom:26px;background:var(--bg1);border-right:1px solid var(--line);font:13px/26px var(--ui)}
+#side .h{padding:10px 20px 6px;font:600 11px var(--ui);letter-spacing:.08em;color:var(--dim)}
+.tr{position:relative;height:26px;padding-left:20px;color:#bdbdbd;white-space:nowrap}
+.tr.act{background:#1d1d1d;color:var(--hi)}
+.tr .r{position:absolute;right:16px;color:var(--dim);font:12px var(--mono)}
+.tr .m{position:absolute;right:16px;font:600 12px var(--ui)}
+#tabs{left:356px;top:40px;right:0;height:36px;background:var(--bg1);border-bottom:1px solid var(--line);display:flex}
+.tab{height:36px;padding:0 18px;display:flex;align-items:center;gap:10px;font:13px var(--ui);color:var(--dim);border-right:1px solid var(--line)}
+.tab.act{background:var(--bg);color:var(--hi);border-bottom:1px solid var(--bg);height:37px}
+#codewrap{left:356px;top:76px;right:0;overflow:hidden}
+#code{position:absolute;left:0;top:10px;width:1564px;font:15px/24px var(--mono);white-space:pre}
+.ln{position:absolute;left:0;height:24px;width:1564px;overflow:hidden}
+.ln .n{display:inline-block;width:46px;text-align:right;color:var(--faint);margin-right:26px}
+.ln .gm{position:absolute;left:54px;top:3px;width:3px;height:18px;border-radius:1px}
+.ln.cur{background:#141414}
+.p{color:#6f6f6f}.tg{color:var(--hi)}.at{color:#9a9a9a}.s{color:var(--str)}.tx{color:var(--fg)}
+.sq{text-decoration:wavy underline var(--bad);text-decoration-thickness:1.5px;text-underline-offset:5px}
+.del{background:rgba(224,108,108,.2);border-radius:2px}
+.ins{background:rgba(142,192,124,.14);border-radius:2px}
+.lens{font-style:italic}
+.ec{display:inline-block;width:2px;height:19px;background:var(--hi);vertical-align:-4px}
+/* panel */
+#panel{left:356px;right:0;bottom:26px;background:var(--bg);border-top:1px solid var(--line);overflow:hidden}
+#ptabs{height:34px;display:flex;align-items:center;gap:28px;padding:0 22px;font:600 11px var(--ui);letter-spacing:.06em;color:var(--dim);border-bottom:1px solid #1a1a1a}
+#ptabs .on{color:var(--hi);box-shadow:inset 0 -1px 0 var(--hi);height:34px;display:flex;align-items:center}
+.badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:6px;border-radius:9px;background:#2a2a2a;color:var(--fg);text-align:center;font:600 10px/16px var(--ui)}
+#termview{position:absolute;left:0;right:0;top:34px;bottom:0;overflow:hidden}
+#term{position:absolute;left:22px;top:10px;right:0;font:15px/24px var(--mono);white-space:pre;color:var(--fg)}
+#term div{height:24px}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.dim{color:var(--dim)}.fg{color:var(--fg)}.b{color:var(--hi);font-weight:700}.bar{color:#9a9a9a}
+.cur{background:var(--fg);color:var(--bg)}
+#status{left:0;right:0;bottom:0;height:26px;background:var(--bg1);border-top:1px solid var(--line);display:flex;align-items:center;gap:22px;padding:0 16px;font:12px var(--ui);color:var(--dim)}
+#status .sp{margin-left:auto}
+/* end */
+#end{left:0;top:0;width:1920px;height:1080px;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0}
+#endcmd{font:700 104px var(--mono);color:var(--hi);letter-spacing:-.02em}
+#endtag{margin-top:34px;font:400 30px var(--mono);color:var(--dim)}
+#endtry{margin-top:70px;font:400 24px var(--mono);color:var(--fg)}
+</style></head><body>
+<div id="stage">
+<div id="ide">
+  <div class="abs" id="titlebar"><i></i><i></i><i></i><span>joes-bikes — index.html</span></div>
+  <div class="abs" id="activity"><b style="top:16px;border-color:#8a8a8a"></b><b style="top:66px"></b><b style="top:116px"></b><b style="top:166px"></b></div>
+  <div class="abs" id="side"><div class="h">EXPLORER</div><div class="h" style="padding-top:4px;color:#a8a8a8">▾ JOES-BIKES</div><div id="tree"></div></div>
+  <div class="abs" id="tabs"><div class="tab act"><span>index.html</span><span id="tabdot" style="color:var(--dim)">×</span></div><div class="tab">style.css</div></div>
+  <div class="abs" id="codewrap"><div id="code"></div></div>
+  <div class="abs" id="panel"><div id="ptabs"><span>PROBLEMS<span class="badge" id="pcount">0</span></span><span>OUTPUT</span><span class="on">TERMINAL</span><span style="margin-left:auto;font-weight:500;letter-spacing:0">zsh</span></div>
+    <div id="termview"><div id="term"></div></div></div>
+  <div class="abs" id="status"><span id="branch">⎇ main</span><span id="probs">⊗ 0  ⚠ 0</span><span class="sp" id="lncol">Ln 4, Col 12</span><span>Spaces: 2</span><span>UTF-8</span><span>HTML</span></div>
+</div>
+<div class="abs" id="end"><div id="endcmd"></div><div id="endtag">Audit, fix and ship SEO from your editor.</div><div id="endtry"></div></div>
+</div>
+<script>
+const DURATION = 45;
+const $ = id => document.getElementById(id);
+const cl = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const L = (a, b, k) => a + (b - a) * k;
+
+// CSS-spec cubic-bezier easing (Newton with bisection fallback).
+function bez(x1, y1, x2, y2) {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const sx = u => ((ax * u + bx) * u + cx) * u, sy = u => ((ay * u + by) * u + cy) * u, dx = u => (3 * ax * u + 2 * bx) * u + cx;
+  return x => {
+    if (x <= 0) return 0; if (x >= 1) return 1;
+    let u = x;
+    for (let i = 0; i < 8; i++) { const e = sx(u) - x, d = dx(u); if (Math.abs(e) < 1e-6 || Math.abs(d) < 1e-6) break; u -= e / d; }
+    if (Math.abs(sx(u) - x) > 1e-4) { let lo = 0, hi = 1; u = x; for (let i = 0; i < 40; i++) { sx(u) < x ? lo = u : hi = u; u = (lo + hi) / 2; } }
+    return sy(u);
+  };
+}
+const E = { out: bez(.16, 1, .3, 1), inOut: bez(.76, 0, .24, 1), cam: bez(.65, 0, .25, 1), lin: x => x };
+const P = (t, a, d, e = E.out) => e(cl((t - a) / d));
+function keys(t, ks, e = E.cam) {
+  if (t <= ks[0][0]) return ks[0][1];
+  for (let i = 1; i < ks.length; i++) if (t <= ks[i][0]) {
+    const [t0, v0] = ks[i - 1], [t1, v1] = ks[i], k = e(cl((t - t0) / (t1 - t0)));
+    return Array.isArray(v0) ? v0.map((x, j) => L(x, v1[j], k)) : L(v0, v1, k);
+  }
+  return ks[ks.length - 1][1];
+}
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const c = (cls, s) => `<span class="${cls}">${esc(s)}</span>`;
+const pad = (s, n) => s + ' '.repeat(Math.max(0, n - s.length));
+const padL = (s, n) => ' '.repeat(Math.max(0, n - s.length)) + s;
+const typed = (s, t, a, cps) => s.slice(0, Math.floor(cl((t - a) * cps, 0, s.length)));
+function swap(t, a, oldS, newS, del, cps) {
+  const td = oldS.length / del, a2 = a + td + .12;
+  if (t < a) return { s: oldS, phase: 'old' };
+  if (t < a + td) return { s: oldS.slice(0, oldS.length - Math.floor((t - a) * del)), phase: 'del' };
+  return { s: typed(newS, t, a2, cps), phase: t < a2 + newS.length / cps ? 'type' : 'done' };
+}
+const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+const spin = t => SPIN[Math.floor(t * 12) % 10];
+const blink = t => Math.floor(t * 2.2) % 2 === 0;
+
+// HTML syntax highlighting, deliberately quiet.
+const hl = s => esc(s)
+  .replace(/(&lt;\/?)([a-z0-9!]+)/g, '<span class=p>$1</span><span class=tg>$2</span>')
+  .replace(/ ([a-z-]+)=("[^"]*"?)/g, ' <span class=at>$1</span><span class=p>=</span><span class=s>$2</span>')
+  .replace(/(&gt;)/g, '<span class=p>$1</span>');
+
+// ---------------- timeline constants ----------------
+const OLD_T = 'Home', NEW_T = "Bike Repairs & Student Rentals in Austin | Joe's Bikes";
+const META = '<meta name="description" content="Same-day bike repairs and student rentals near UT Austin.">';
+const OLD_H = '<div class="big">Welcome to our website!!!</div>', NEW_H = '<h1>Bike repairs & student rentals in Austin</h1>';
+const ALT = ' alt="Mechanic tuning a road bike" fetchpriority="high"';
+const OLD_L = 'click here', NEW_L = 'Shop student bikes';
+// [label, cited source, edit start, edit done, problem appears]
+const FIX = [
+  ['title',            'developers.google.com/search/docs/appearance/title-link', 19.4, 21.2, 0.7],
+  ['meta description', 'developers.google.com/search/docs/appearance/snippet', 21.4, 23.15, 1.1],
+  ['h1 heading',       'developers.google.com/search/docs/fundamentals/seo-starter-guide', 23.4, 25.2, 1.5],
+  ['image alt text',   'developers.google.com/search/docs/appearance/google-images', 25.45, 26.6, 1.9],
+  ['link text',        'developers.google.com/search/docs/crawling-indexing/links-crawlable', 26.8, 27.75, 2.3],
+];
+const LENS = ['Title is just “Home”', 'No meta description', 'No H1 · generic heading', 'Hero image: 4.8 MB, no alt text', 'Vague link text'];
+const seen = (t, i) => t >= FIX[i][4];
+const fixed = (t, i) => t >= FIX[i][3];
+const lens = (t, i) => seen(t, i) && t < FIX[i][2] ? `<span class="lens" style="color:rgba(224,108,108,${.85 * P(t, FIX[i][4], .4)})">    ● ${esc(LENS[i])}</span>` : '';
+const sq = (t, i, html) => seen(t, i) && t < FIX[i][2] ? `<span class=sq>${html}</span>` : html;
+
+// ---------------- editor ----------------
+const LH = 24, CODE_X = 428;
+function editorLines(t) {
+  const out = [];
+  const add = (html, h = 1, mark = null, col = null) => out.push({ html, h, mark, col });
+  const ed = (w, cls) => (w.phase === 'old' ? '' : `<span class=${w.phase === 'del' ? 'del' : 'ins'}>`) + hl(w.s) + (w.phase === 'old' ? '' : '</span>') + ((w.phase === 'del' || w.phase === 'type') ? '<span class=ec></span>' : '');
+  add(hl('<!doctype html>')); add(hl('<html lang="en">'));
+  add(hl('<head>') + lens(t, 1));
+  let w = swap(t, FIX[0][2], OLD_T, NEW_T, 22, 40);
+  add(hl('  <title>') + (w.phase === 'old' ? sq(t, 0, `<span class=tx>${esc(w.s)}</span>`) : ed(w)) + hl('</title>') + lens(t, 0), 1, t > FIX[0][2] ? 'ok' : seen(t, 0) ? 'bad' : null);
+  const mh = P(t, FIX[1][2], .3), ms = typed(META, t, FIX[1][2] + .15, 62), mtyping = t > FIX[1][2] + .1 && ms.length < META.length;
+  add('  ' + (ms ? `<span class=ins>${hl(ms)}</span>` : '') + (mtyping || (mh > 0 && !ms) ? '<span class=ec></span>' : ''), mh, mh > 0 ? 'ok' : null);
+  add(hl('  <link rel="stylesheet" href="/style.css">')); add(hl('</head>')); add(hl('<body>'));
+  w = swap(t, FIX[2][2], OLD_H, NEW_H, 75, 46);
+  add('  ' + (w.phase === 'old' ? sq(t, 2, hl(w.s)) : ed(w)) + lens(t, 2), 1, t > FIX[2][2] ? 'ok' : seen(t, 2) ? 'bad' : null);
+  const as = typed(ALT, t, FIX[3][2], 48), atyping = t > FIX[3][2] && as.length < ALT.length;
+  add(hl('  <img ') + sq(t, 3, hl('src="/img/hero.jpg"')) + (as ? `<span class=ins>${hl(as)}</span>` : '') + (atyping ? '<span class=ec></span>' : '') + hl('>') + lens(t, 3), 1, t > FIX[3][2] ? 'ok' : seen(t, 3) ? 'bad' : null);
+  add(hl('  <p>We sell bikes and do repairs and stuff.</p>'));
+  w = swap(t, FIX[4][2], OLD_L, NEW_L, 30, 34);
+  add(hl('  <a href="/shop">') + (w.phase === 'old' ? sq(t, 4, `<span class=tx>${esc(w.s)}</span>`) : ed(w)) + hl('</a>') + lens(t, 4), 1, t > FIX[4][2] ? 'ok' : seen(t, 4) ? 'bad' : null);
+  add(hl('</body>')); add(hl('</html>'));
+  return out;
+}
+$('code').innerHTML = Array.from({ length: 14 }, (_, i) => `<div class="ln" id="ln${i}"><span class="gm" id="gm${i}"></span></div>`).join('');
+function drawEditor(t) {
+  let y = 0, n = 0;
+  editorLines(t).forEach((l, i) => {
+    const el = $('ln' + i);
+    el.style.top = y + 'px'; el.style.height = LH * l.h + 'px'; el.style.opacity = l.h;
+    if (l.h > .01) n++;
+    const gm = l.mark ? `<span class="gm" style="background:var(--${l.mark})"></span>` : '';
+    el.innerHTML = gm + `<span class="n">${l.h > .5 ? n : ''}</span>` + l.html;
+    y += LH * l.h;
+  });
+}
+
+// ---------------- explorer ----------------
+function drawTree(t) {
+  const hero = P(t, 30.0, 1.2, E.inOut), kb = L(4800, 312, hero);
+  const size = kb >= 1000 ? (kb / 1000).toFixed(1) + ' MB' : Math.round(kb) + ' KB';
+  const mod = (cond, letter = 'M') => cond ? `<span class="m" style="color:var(--warn)">${letter}</span>` : '';
+  $('tree').innerHTML = [
+    `<div class="tr" style="padding-left:30px">▾ img</div>`,
+    `<div class="tr" style="padding-left:52px">hero.jpg<span class="r" style="right:${t > 30 ? 36 : 16}px;color:${hero > .98 ? 'var(--ok)' : 'var(--dim)'}">${size}</span>${mod(t > 31.2)}</div>`,
+    `<div class="tr" style="padding-left:52px">shop-1.jpg<span class="r">1.9 MB</span></div>`,
+    `<div class="tr" style="padding-left:52px">shop-2.jpg<span class="r">2.2 MB</span></div>`,
+    `<div class="tr act" style="padding-left:30px">index.html${mod(t > FIX[0][2])}</div>`,
+    `<div class="tr" style="padding-left:30px">style.css</div>`,
+    `<div class="tr" style="padding-left:30px">README.md</div>`,
+  ].join('');
+}
+
+// ---------------- terminal script ----------------
+const CMD1 = 'seofixer audit https://joesbikes.com --repo joe/joes-bikes';
+const CMD2 = 'seofixer measure https://joesbikes.com';
+const PROMPT = c('dim', '~/joes-bikes ') + c('fg', '$ ');
+const cursor = (t, solid) => (solid || blink(t)) ? '<span class=cur> </span>' : ' ';
+const task = (t, done, run, fin) => t < done ? c('dim', spin(t)) + ' ' + c('fg', run) : c('ok', '✓') + ' ' + fin;
+const T = [];
+const line = (at, f) => T.push([at, typeof f === 'string' ? () => f : f]);
+
+line(0, t => PROMPT + c('fg', typed(CMD1, t, 5.5, 44)) + (t < 6.9 ? cursor(t, t > 5.5) : ''));
+line(7.0, c('dim', 'seofixer 0.4.0 · 4 agents · claude-haiku-5-5'));
+line(7.05, '');
+line(7.1, t => task(t, 8.3, 'Rendering joesbikes.com in headless Chromium', c('fg', 'Rendered joesbikes.com') + c('dim', '   87 requests · 1280×800 · full-page screenshot')));
+const metric = (label, val, flag) => '  ' + c('fg', pad(label, 28)) + c('bad', pad(val, 10) + '✗ ' + flag);
+line(8.45, metric('largest contentful paint', '8.4 s', 'slow'));
+line(8.6, metric('page weight', '6.2 MB', 'heavy'));
+line(8.75, metric('google seo score', '42/100', 'poor'));
+line(8.9, metric('performance score', '31/100', 'poor'));
+line(9.2, '');
+line(9.25, c('b', 'Rule checks') + c('dim', '   5 issues'));
+[['high', 'Title is just "Home"'], ['medium', 'No meta description'], ['medium', '1 image has no alt text'], ['low', 'No H1 heading'], ['low', 'Vague link text: "click here"']]
+  .forEach(([sev, txt], i) => line(9.4 + i * .12, '  ' + c('bad', '✗') + ' ' + c(sev === 'high' ? 'bad' : sev === 'medium' ? 'warn' : 'dim', pad(sev, 8)) + c('fg', txt)));
+line(10.15, '');
+line(10.2, c('b', 'Agents') + c('dim', '   4 running in parallel'));
+const AG = [
+  ['titles',    [[10.3, 'search  "writing good title links"'], [13.0, 'reading 3 passages'], [16.3, '3 fixes · score 41/100']]],
+  ['content',   [[10.4, 'search  "clear main heading"'], [13.3, 'reading 3 passages'], [16.6, '2 fixes · score 48/100']]],
+  ['images',    [[10.5, 'search  "image alt text"'], [13.9, 'web_search  developer.mozilla.org'], [16.9, '3 fixes · score 35/100']]],
+  ['technical', [[10.6, 'search  "descriptive link text"'], [14.3, 'web_search  web.dev'], [17.2, '2 fixes · score 52/100']]],
+];
+AG.forEach(([name, steps]) => line(steps[0][0], t => {
+  const cur = steps.filter(s => t >= s[0]).pop(), done = cur === steps[2];
+  return '  ' + (done ? c('ok', '✓') : c('dim', spin(t + name.length))) + ' ' + c('fg', pad(name, 11)) + c(done ? 'fg' : 'dim', cur[1]);
+}));
+line(10.9, '');
+line(11.0, '  ' + c('dim', 'chroma  ') + c('fg', '"writing good title links"') + c('dim', '   12 Google sources · cosine similarity'));
+const BLOCKS = ' ▏▎▍▌▋▊▉';
+const bar = (f, n = 24) => { const x = cl(f) * n, full = Math.floor(x), part = Math.floor((x - full) * 8); return '█'.repeat(full) + (full < n ? BLOCKS[part] : '') + ' '.repeat(Math.max(0, n - full - 1)); };
+[[0.91, 'search/docs/appearance/title-link', 'Titles should be descriptive and concise. Avoid vague text like "Home".'],
+ [0.87, 'search/docs/appearance/snippet', 'Write a unique meta description that summarizes the page.'],
+ [0.84, 'search/docs/appearance/google-images', 'Use descriptive alt text so Google understands the image.']]
+  .forEach(([sim, src, quote], i) => {
+    const a = 11.25 + i * .45;
+    line(a, t => '    ' + c('fg', sim.toFixed(2)) + '  ' + c('bar', bar(P(t, a, .7) * sim)) + '  ' + c('fg', src));
+    line(a + .15, '                                      ' + c('dim', '“' + quote + '”'));
+  });
+line(13.9, '  ' + c('dim', 'web     ') + c('fg', 'developer.mozilla.org') + c('dim', '/docs/Web/HTML/Element/img#alt'));
+line(14.3, '  ' + c('dim', 'web     ') + c('fg', 'web.dev') + c('dim', '/articles/browser-level-image-lazy-loading'));
+line(17.5, '');
+line(17.55, c('ok', '✓') + ' ' + c('fg', '10 fixes') + c('dim', ' · 5 exact edits · every one cited'));
+line(18.0, '');
+line(18.05, t => task(t, 27.85, 'Applying 5 edits to index.html', c('fg', 'Applied 5 edits to index.html')));
+FIX.forEach(([label, src, , done]) => line(done, '    ' + c('ok', '+') + ' ' + c('fg', pad(label, 20)) + c('dim', src)));
+line(29.6, '');
+line(29.65, c('b', 'Images'));
+line(29.75, t => {
+  const k = P(t, 30.0, 1.2, E.inOut), kb = L(4800, 312, k), v = kb >= 1000 ? (kb / 1000).toFixed(1) + ' MB' : Math.round(kb) + ' KB';
+  return '  ' + c('fg', pad('img/hero.jpg', 24)) + c('dim', '4.8 MB → ') + c(k > .98 ? 'ok' : 'fg', pad(v, 8)) + (k > .98 ? c('ok', '  −94%') : '');
+});
+line(30.5, '  ' + c('fg', pad('loading="lazy"', 24)) + c('dim', '3 images below the fold'));
+line(30.65, '  ' + c('fg', pad('fetchpriority="high"', 24)) + c('dim', 'img/hero.jpg'));
+line(30.95, '');
+line(31.0, c('b', 'Pull request'));
+line(31.1, t => task(t, 31.95, 'Pushing branch seofixer/seo-fixes-3f9a1c', c('fg', 'Draft PR #42  ') + c('dim', 'github.com/joe/joes-bikes/pull/42')));
+line(32.05, '  ' + c('dim', '5 text edits · 3 images · nothing merged automatically'));
+line(32.4, '');
+line(32.45, t => PROMPT + c('fg', typed(CMD2, t, 32.75, 42)) + (t < 33.75 ? cursor(t, t > 32.75) : ''));
+line(33.85, t => task(t, 35.0, 'Measuring joesbikes.com again', c('fg', 'Measured joesbikes.com')));
+line(35.1, '');
+line(35.15, '  ' + c('dim', pad('metric', 28) + padL('before', 10) + padL('after', 10) + padL('change', 12)));
+[['google seo score', 42, 100, 0, ''], ['performance score', 31, 96, 0, ''], ['largest contentful paint', 8.4, 1.2, 1, ' s'], ['page weight', 6.2, 0.9, 1, ' MB']]
+  .forEach(([label, b, a, d, u], i) => {
+    const at = 35.3 + i * .15, k0 = 35.55 + i * .22;
+    line(at, t => {
+      const k = P(t, k0, 1.3), v = L(b, a, k), diff = a - b;
+      return '  ' + c('fg', pad(label, 28)) + c('dim', padL(b.toFixed(d) + u, 10)) + c(k > .5 ? 'ok' : 'bad', padL(v.toFixed(d) + u, 10))
+        + (k > .97 ? c('ok', padL((diff > 0 ? '+' : '−') + Math.abs(diff).toFixed(d) + u, 12)) : '');
+    });
+  });
+line(37.6, '');
+line(37.65, c('ok', '✓') + ' ' + c('fg', '4 of 4 metrics better · rule checks 11/11 passed'));
+line(38.1, '');
+line(38.15, t => PROMPT + cursor(t));
+
+const TLH = 24;
+function termCount(t) { let n = 0; for (const [at] of T) if (t >= at) n++; return n; }
+function drawTerm(t, viewH) {
+  $('term').innerHTML = T.filter(([at]) => t >= at).map(([, f]) => `<div>${f(t)}</div>`).join('');
+  // smooth auto-scroll: average the target over the last 0.3s
+  let s = 0; for (let k = 0; k < 10; k++) s += Math.max(0, termCount(t - k * .03) * TLH + 20 - viewH); s /= 10;
+  $('term').style.transform = `translateY(${-s}px)`;
+}
+
+// ---------------- camera ----------------
+const TERM = [1094, 665, 1.3];
+const EDIT = (lineY, s = 1.85) => [360 + 960 / s, Math.max(76 + 10 + lineY + 12, 540 / s), s];  // never show past the top edge
+const CAM = [
+  [0, EDIT(7 * 24, 1.6)], [3.7, EDIT(6.6 * 24, 1.68)],
+  [4.6, [960, 540, 1]],
+  [5.35, TERM], [18.25, TERM],
+  [19.05, EDIT(3 * 24)], [21.25, EDIT(3 * 24)],
+  [21.5, EDIT(4 * 24)], [23.2, EDIT(4 * 24)],
+  [23.45, EDIT(8 * 24)], [25.25, EDIT(8 * 24)],
+  [25.45, EDIT(9 * 24)], [26.65, EDIT(9 * 24)],
+  [26.85, EDIT(11 * 24)], [27.85, EDIT(11 * 24)],
+  [28.5, [360 + 960 / 1.25, 540 / 1.25, 1.25]], [29.0, [360 + 960 / 1.25, 540 / 1.25, 1.25]],
+  [29.65, TERM], [40.7, TERM],
+  [41.7, [960, 540, 1]], [45, [960, 540, .96]],
+];
+
+// ---------------- master timeline ----------------
+function render(t) {
+  const [cx, cy, s] = keys(t, CAM);
+  $('ide').style.transform = `translate(${960 - cx * s}px,${540 - cy * s}px) scale(${s})`;
+  $('ide').style.opacity = P(t, 0, .5) * (1 - P(t, 42.0, .6, E.inOut));
+
+  const ph = keys(t, [[4.5, 300], [5.2, 640]], E.inOut);
+  $('panel').style.height = ph + 'px';
+  $('codewrap').style.height = (1080 - 26 - ph - 76) + 'px';
+  drawEditor(t); drawTree(t); drawTerm(t, ph - 34 - 10);
+
+  const probs = FIX.filter((_, i) => seen(t, i) && !fixed(t, i)).length;
+  $('pcount').textContent = probs; $('probs').textContent = `⊗ ${probs}  ⚠ 0`;
+  $('probs').style.color = probs ? 'var(--bad)' : 'var(--dim)';
+  $('branch').textContent = t > 31.6 ? '⎇ seofixer/seo-fixes-3f9a1c' : '⎇ main';
+  $('tabdot').textContent = t > FIX[0][2] ? '●' : '×';
+  const active = FIX.findIndex(f => t >= f[2] && t < f[3] + .2);
+  $('lncol').textContent = active >= 0 ? `Ln ${[4, 5, 9, 10, 12][active]}, Col ${[9, 3, 3, 26, 19][active]}` : 'Ln 4, Col 12';
+
+  // end card: a command typed on black
+  const e = P(t, 42.4, .5); $('end').style.opacity = e;
+  $('endcmd').innerHTML = esc(typed('seofixer', t, 42.6, 18)) + (t > 42.4 ? cursor(t, t < 43.1) : '');
+  $('endtag').style.opacity = P(t, 43.3, .6);
+  $('endtry').innerHTML = c('dim', '$ ') + esc('seofixer audit https://your-site.com');
+  $('endtry').style.opacity = P(t, 43.8, .6);
+}
+
+window.render = render;
+const params = new URLSearchParams(location.search);
+function fit() { const s = Math.min(innerWidth / 1920, innerHeight / 1080); $('stage').style.transform = `translate(${(innerWidth - 1920 * s) / 2}px,${(innerHeight - 1080 * s) / 2}px) scale(${s})`; }
+if (!params.has('capture')) {
+  fit(); addEventListener('resize', fit);
+  const start = performance.now() - (+params.get('t') || 0) * 1000;
+  const loop = () => { render(((performance.now() - start) / 1000) % DURATION); requestAnimationFrame(loop); };
+  loop();
+} else render(+params.get('t') || 0);
+</script>
+</body></html>
