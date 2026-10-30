@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SEO Fixer</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font: 16px/1.6 system-ui, sans-serif; margin: 0; background: #f4f6fa; color: #18202e; }
+    main { max-width: 850px; margin: 40px auto; padding: 0 20px 60px; }
+    h1 { margin-bottom: 0; }
+    h2 { font-size: 1.3rem; margin-top: 30px; }
+    form, .card { background: white; padding: 20px; border: 1px solid #d9dee8; border-radius: 8px; margin: 16px 0; }
+    label { display: block; margin-top: 10px; }
+    input[type=url], input[type=text] { width: 100%; padding: 10px; font: inherit; }
+    button { padding: 10px 16px; margin-top: 14px; border: 0; border-radius: 5px; background: #2449c7; color: white; font: inherit; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .note { color: #5b6577; font-size: .9rem; }
+    .notice, .error { padding: 12px; background: #e8efff; border-radius: 6px; margin: 14px 0; }
+    .error { color: #922a23; background: #fbe9e7; }
+    .fix { border-bottom: 1px solid #d9dee8; padding: 16px 0; }
+    .fix h3 { margin: 0; font-size: 1.05rem; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; font-size: .85rem; }
+    .old { background: #fbe9e7; }
+    .new { background: #e5f4ec; }
+    a { color: #2449c7; overflow-wrap: anywhere; }
+    .table-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; background: white; }
+    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #d9dee8; }
+    .better { color: #17683f; }
+    .worse { color: #922a23; }
+    img { max-width: 100%; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>SEO Fixer</h1>
+  <p>Check a page, review evidence-backed suggestions, and prepare a draft GitHub pull request.</p>
+
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+
+  <!-- Setup: download the guidance used by the agents. -->
+  <details>
+    <summary>Setup and guidance</summary>
+    <p class="note">
+      Rule checks and screenshots work without keys. Add ANTHROPIC_API_KEY in .env for the four AI agents,
+      GITHUB_TOKEN for draft PRs, and PAGESPEED_API_KEY for Google scores. Restart after editing .env.
+    </p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="ingest">
+      <button>Build / refresh SEO knowledge base</button>
+      <p class="note">Downloads Google Search Central guidance and embeds it locally. Run once before using AI, then refresh when needed.</p>
+    </form>
+  </details>
+
+  <!-- Step 1: choose a website and optional repository. -->
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="audit">
+    <label for="url">Public page URL</label>
+    <input id="url" type="url" name="url" required value="{{ url }}" placeholder="https://example.com">
+    <label for="repo">GitHub repository (optional)</label>
+    <input id="repo" type="text" name="repo" value="{{ repo }}" placeholder="owner/repo">
+    <button>Audit page</button>
+  </form>
+
+  {% if audit_id %}
+    <!-- Step 2: read the rule checks, measurements, and agent reports. -->
+    <h2>Rule checks</h2>
+    <ul>
+      {% for issue in issues %}
+        <li><strong>{{ issue.severity }}:</strong> {{ issue.detail }}</li>
+      {% empty %}
+        <li>No issues found by these checks.</li>
+      {% endfor %}
+    </ul>
+    <p class="note">These are review prompts, not Google ranking guarantees. Counts describe the rendered page; text passed to the AI is limited.</p>
+
+    <h2>Measurements{% if after %}: before and after{% endif %}</h2>
+    <div class="table-wrap">
+      <table>
+        <tr>
+          <th>Metric</th><th>Before</th>
+          {% if after %}<th>After</th><th>Change</th>{% endif %}
+        </tr>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.name }}</td>
+            <td>{{ row.before|default_if_none:'n/a' }}</td>
+            {% if after %}
+              <td>{{ row.after|default_if_none:'n/a' }}</td>
+              <td class="{{ row.verdict }}">{{ row.change }}</td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </table>
+    </div>
+    <p class="note">Google scores require a PageSpeed key and may vary between runs. Image transfers cover sampled images, not total page weight.</p>
+
+    {% if report.areas %}
+      <h2>Four-agent review</h2>
+      <p>AI assessment: {{ report.score }}/100. This is a subjective average of {{ report.areas|length }} completed specialists, not a Google score.</p>
+      <ul>
+        {% for area in report.areas %}
+          <li><strong>{{ area.name }} ({{ area.score }}):</strong> {{ area.summary }}</li>
+        {% endfor %}
+      </ul>
+      <p class="note">{{ usage.turns }} turns · {{ usage.input_tokens }} input tokens · {{ usage.output_tokens }} output tokens</p>
+    {% endif %}
+    {% for failure in report.failures %}
+      <p class="notice">{{ failure }}</p>
+    {% endfor %}
+
+    <!-- Step 3: select reviewed changes for a draft pull request. -->
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="pr">
+      <input type="hidden" name="audit_id" value="{{ audit_id }}">
+      {% for fix in report.fixes %}
+        <div class="fix">
+          <h3>{{ fix.issue }}</h3>
+          <small>{{ fix.severity }} · {{ fix.agent }}</small>
+          <p>{{ fix.why }}</p>
+          {% if fix.find %}
+            <pre class="old">{{ fix.find }}</pre>
+            <pre class="new">{{ fix.replace }}</pre>
+          {% endif %}
+          {% if fix.source %}
+            <!-- nosemgrep: generic.html-templates.security.var-in-href.var-in-href -- reason: ai.validate_report accepts only source URLs retrieved from the indexed Google documentation; form submissions cannot supply them. -->
+            <a href="{{ fix.source }}" target="_blank" rel="noopener">Google guidance</a>
+          {% else %}
+            <p class="note">No retrieved citation verified; manual review needed.</p>
+          {% endif %}
+          {% if repo and fix.find %}
+            <label><input type="checkbox" name="selected" value="{{ forloop.counter0 }}" checked> Include this proposed edit</label>
+          {% endif %}
+        </div>
+      {% endfor %}
+
+      {% if perf_items %}
+        <h2>Possible image improvements</h2>
+        <ul>
+          {% for item in perf_items %}
+            <li>{{ item.src|truncatechars:80 }}: {{ item.notes|join:'; ' }}</li>
+          {% endfor %}
+        </ul>
+        {% if repo %}
+          <label><input type="checkbox" name="perf" value="1"> Include image compression, resizing, and supported HTML loading attributes</label>
+        {% endif %}
+        <p class="note">Image changes need visual review. Two sampled desktop widths cannot prove quality across every device. External image hosts are skipped.</p>
+      {% endif %}
+
+      {% if repo and not pr %}
+        <button>Open draft pull request with selected changes</button>
+        <p class="note">Only exact, unique source text matches are changed. Template/generated content may need manual edits. Nothing is merged automatically.</p>
+      {% endif %}
+    </form>
+
+    {% if pr %}
+      <div class="card">
+        {% if pr.pr_url %}
+          <!-- nosemgrep: generic.html-templates.security.var-in-href.var-in-href -- reason: github.create_pull_request gets this URL from GitHub's authenticated API response and stores it in the server-side session, not from form input. -->
+          <p>Draft PR: <a href="{{ pr.pr_url }}">{{ pr.pr_url }}</a></p>
+        {% else %}
+          <p>No matching changes were found; no PR was opened.</p>
+        {% endif %}
+        <ul>
+          {% for fix, path in pr.applied %}<li>{{ fix.issue }} — {{ path }}</li>{% endfor %}
+          {% for image in pr.images %}<li>{{ image.path }}: {{ image.old_kb }} KB → {{ image.new_kb }} KB</li>{% endfor %}
+          {% for attribute in pr.attributes %}<li>{{ attribute }}</li>{% endfor %}
+          {% for fix, reason in pr.skipped %}<li>Skipped {{ fix.issue }}: {{ reason }}</li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
+    <!-- Step 4: compare the deployed result with the saved baseline. -->
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="measure">
+      <input type="hidden" name="audit_id" value="{{ audit_id }}">
+      <label for="after_url">After URL (optional; defaults to the audited page)</label>
+      <input id="after_url" type="url" name="after_url" placeholder="{{ url }}">
+      <button>Measure again</button>
+      <p class="note">Review and merge the PR yourself, wait for deployment, then compare the result.</p>
+    </form>
+
+    {% if visual %}
+      <h2>Screenshot comparison</h2>
+      <p>{{ visual.percent }}% of sampled pixels changed. Height difference: {{ visual.height_change }} px.</p>
+      <img src="data:image/jpeg;base64,{{ visual.image }}" alt="Changed screenshot areas highlighted in red">
+      <p class="note">Screenshots cover up to the first 15,000 px. Animation, ads, fonts, and changing content can affect this comparison.</p>
+    {% endif %}
+  {% endif %}
+</main>
+<script>
+  document.querySelectorAll('form').forEach(form => {
+    form.addEventListener('submit', () => {
+      const button = form.querySelector('button');
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Working…';
+      }
+    });
+  });
+</script>
+</body>
+</html>

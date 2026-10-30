@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+db.sqlite3
+chroma_db/
+screenshots/
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.egg-info/
+dist/
+build/
