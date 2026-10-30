@@ -170,7 +170,18 @@ class AgentTests(SimpleTestCase):
         no_meta = audit.extract_page_data(HTML.replace('<meta name="description" content="Buy and repair student bicycles.">', ''), 'https://example.com/')
         added = fix(find='</title>', replace='</title>\n<meta name="description" content="Student bike repairs.">')
         result = ai.validate_report({'score': 70, 'summary': 'Review.', 'fixes': [added]}, {SOURCE}, no_meta)
-        self.assertEqual(result['fixes'][0]['find'], '</title>')
+        self.assertEqual(result['fixes'][0]['find'], 'Bikes for students</title>')  # anchored to this page
+
+    def test_meta_insert_and_title_fix_both_apply_on_multi_page_sites(self):
+        page = audit.extract_page_data(HTML.replace('<meta name="description" content="Buy and repair student bicycles.">', ''), 'https://example.com/')
+        insert = fix(find='</title>', replace='</title>\n<meta name="description" content="Student bike repairs.">')
+        fixes = ai.validate_report({'score': 50, 'summary': 'Review.', 'fixes': [fix(), insert]}, {SOURCE}, page)['fixes']
+        files = {'index.html': {'text': '<title>Bikes for students</title>', 'changed': False},
+                 'shop.html': {'text': '<title>Shop</title>', 'changed': False}}
+        result, _ = repo.apply_changes(files, [], None, fixes, 'https://example.com/', [])
+        self.assertEqual(len(result['applied']), 2)
+        self.assertEqual(files['index.html']['text'], '<title>Student bicycle repairs</title>\n<meta name="description" content="Student bike repairs.">')
+        self.assertFalse(files['shop.html']['changed'])
 
     @override_settings(ANTHROPIC_API_KEY='test')
     @patch('seofixer.ai.search_guidelines', return_value=[])
@@ -218,7 +229,7 @@ class AgentTests(SimpleTestCase):
     def test_all_four_specialists_really_run_in_parallel(self, collection):
         collection.return_value.count.return_value = 3
         barrier = threading.Barrier(4)
-        def run(specialist, page, issues):
+        def run(specialist, page, issues, on_event=None):
             barrier.wait(timeout=5)
             return {'score': 80, 'summary': specialist['key'], 'fixes': [fix()]}, {'input_tokens': 1, 'output_tokens': 2, 'turns': 2}
         with patch('seofixer.ai.run_agent', side_effect=run):

@@ -92,16 +92,17 @@ def google_scores(url):
     return scores
 
 
-def measure(url):
+def measure(url, trusted_origin=None):
     """Read the page and collect every number for the comparison table."""
     with ThreadPoolExecutor(max_workers=1) as pool:
-        google_job = pool.submit(google_scores, url)  # Google runs while we read the page
-        page = audit.fetch_page(url)
+        # Google runs while we read the page; it cannot reach the CLI's local preview.
+        google_job = pool.submit(google_scores, url) if not trusted_origin else None
+        page = audit.fetch_page(url, trusted_origin)
         page_data = audit.extract_page_data(page["html"], page["url"])
         page_data.update(audit.read_robots(page["url"]))
         issues = audit.run_checks(page_data)
         perf_items = find_performance_issues(page["images"])
-        google = google_job.result()
+        google = google_job.result() if google_job else {}
 
     images = page_data["image_count"]
     image_bytes = {i["url"]: i["bytes"] for i in page["images"]}

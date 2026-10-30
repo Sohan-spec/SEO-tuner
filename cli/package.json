@@ -1,0 +1,12 @@
+{
+  "name": "seofixer",
+  "version": "0.4.0",
+  "description": "Audit, fix and ship SEO from your editor. Run `seofixer` inside your website folder.",
+  "type": "module",
+  "bin": { "seofixer": "seofixer.js" },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "ink": "^8.0.0",
+    "react": "^19.3.1"
+  }
+}

@@ -78,8 +78,8 @@ def search_guidelines(query):
     if not collection.count():
         return []
     results = collection.query(query_texts=[query], n_results=min(settings.SEARCH_RESULTS, collection.count()))
-    return [{"source": meta["source"], "text": text}
-            for text, meta in zip(results["documents"][0], results["metadatas"][0])]
+    return [{"source": meta["source"], "text": text, "score": round(1 - distance, 2)}  # cosine similarity
+            for text, meta, distance in zip(results["documents"][0], results["metadatas"][0], results["distances"][0])]
 
 
 UNSAFE = re.compile(r"<script|<iframe|<style|javascript:|\son\w+\s*=", re.I)
@@ -121,13 +121,19 @@ def validate_report(report, sources, page_data):
         # The new text goes into the repo, so it may never carry code (the audited page could ask for it).
         if not known or UNSAFE.search(fix["replace"]):
             fix["find"] = fix["replace"] = ""
+        elif find == "</title>":  # every page has </title>; anchor the insert to this page's title
+            fix["find"], fix["replace"] = page_data["title"] + find, page_data["title"] + fix["replace"]
         clean.append(fix)
     return {"score": score, "summary": report["summary"][:2000], "fixes": clean}
 
 
-def run_agent(specialist, page_data, issues):
-    """Each specialist searches guidance, then submits a validated report."""
+def run_agent(specialist, page_data, issues, on_event=None):
+    """Each specialist searches guidance, then submits a validated report.
+
+    on_event(agent, status, **details) reports progress to the CLI; the web app leaves it out."""
     import anthropic
+    notify = lambda status, **details: on_event and on_event(specialist["key"], status, **details)
+    notify("thinking")
     client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=120, max_retries=1)
     page_slice = {field: page_data[field] for field in specialist["fields"]}
     if specialist["body_chars"]:
@@ -162,6 +168,7 @@ def run_agent(specialist, page_data, issues):
             # Web results are real URLs, so they become valid citations (https only: they render as links).
             if block.type == "web_search_tool_result" and isinstance(block.content, list):
                 sources.update(r.url for r in block.content if r.url.startswith("https://"))
+                notify("web", urls=[r.url for r in block.content][:3])
         if response.stop_reason == "pause_turn" and resumes < 2:
             resumes += 1
             continue  # A long web search paused; sending the turn back resumes it.
@@ -172,7 +179,9 @@ def run_agent(specialist, page_data, issues):
                 continue
             if block.name == "submit_report":
                 if searches:
-                    return validate_report(block.input, sources, page_data), usage
+                    report = validate_report(block.input, sources, page_data)
+                    notify("done", fixes=len(report["fixes"]), score=report["score"])
+                    return report, usage
                 tool_results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": True,
                                      "content": "Search with search_seo_guidelines before submitting."})
                 continue
@@ -185,6 +194,7 @@ def run_agent(specialist, page_data, issues):
             passages = search_guidelines(query[:500]) if searches < 3 else []
             searches += 1
             sources.update(p["source"] for p in passages)
+            notify("search", query=query[:80], results=[(p.get("score"), p["source"]) for p in passages])
             tool_results.append({"type": "tool_result", "tool_use_id": block.id,
                                  "content": json.dumps(passages)})
         if not tool_results or turn == settings.AGENT_MAX_TURNS - 1:  # next turn is the last one
@@ -196,7 +206,7 @@ def run_agent(specialist, page_data, issues):
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 
-def run_all_agents(page_data, issues):
+def run_all_agents(page_data, issues, on_event=None):
     """Run every specialist in parallel, then merge their reports in Python."""
     empty = {"score": None, "areas": [], "fixes": [], "failures": []}
     usage = {"input_tokens": 0, "output_tokens": 0, "turns": 0}
@@ -207,7 +217,7 @@ def run_all_agents(page_data, issues):
         empty["failures"] = ["Build the SEO knowledge base before running AI suggestions."]
         return empty, usage
     with ThreadPoolExecutor(max_workers=len(prompts.SPECIALISTS)) as pool:
-        jobs = [(s, pool.submit(run_agent, s, page_data, issues)) for s in prompts.SPECIALISTS]
+        jobs = [(s, pool.submit(run_agent, s, page_data, issues, on_event)) for s in prompts.SPECIALISTS]
 
     areas, all_fixes, failures = [], [], []
     usage = {"input_tokens": 0, "output_tokens": 0, "turns": 0}
@@ -217,6 +227,8 @@ def run_all_agents(page_data, issues):
         except Exception:  # Keep the reports from specialists that succeeded.
             logging.getLogger(__name__).exception("Specialist failed")
             failures.append(f"{specialist['name']} could not finish. Check the key, quota, and terminal log.")
+            if on_event:
+                on_event(specialist["key"], "failed")
             continue
         areas.append({"name": specialist["name"], "score": report["score"], "summary": report["summary"]})
         for fix in report["fixes"]:

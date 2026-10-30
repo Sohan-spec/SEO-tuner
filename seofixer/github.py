@@ -122,6 +122,45 @@ def add_image_attribute(files, src, name, value):
     return path
 
 
+def apply_changes(files, image_paths, read_bytes, fixes, page_url, perf_items):
+    """Edit `files` in place and shrink images. Shared by the pull request and the local CLI."""
+    result = {"applied": [], "skipped": [], "images": [], "attributes": []}
+
+    # Step 1: the AI's SEO text fixes. Head-tag inserts go first: they are anchored to the old title text.
+    for fix in sorted(fixes, key=lambda f: not f.get("find", "").endswith("</title>")):
+        if not fix.get("find"):
+            result["skipped"].append((fix, "Needs a manual change."))
+            continue
+        file_path = replace_once_in_repo(files, fix["find"], fix["replace"])
+        if file_path:
+            result["applied"].append((fix, file_path))
+        else:
+            result["skipped"].append((fix, "Text not found exactly once in the repo."))
+
+    # Step 2: performance attributes and image files.
+    new_images = {}
+    for item in perf_items:
+        if urlparse(item["url"]).netloc != urlparse(page_url).netloc:
+            continue  # A third-party image is not necessarily an asset in this repo.
+        for flag, name, value in (("lazy", "loading", "lazy"), ("priority", "fetchpriority", "high")):
+            if item[flag] and item["src"]:
+                file_path = add_image_attribute(files, item["src"], name, value)
+                if file_path:
+                    result["attributes"].append((f'{name}="{value}" on {item["src"]}', file_path))
+        if item["oversized"] or item["heavy"]:
+            file_path = repo_path_for(item["url"], image_paths)
+            if file_path and file_path not in new_images:
+                original = read_bytes(file_path)
+                # Resize only an image this page alone uses; another page may show it larger.
+                used_once = sum(f["text"].count(file_path.rsplit("/", 1)[-1]) for f in files.values()) == 1
+                smaller = optimize_image(original, item["needed_width"] if item["oversized"] and used_once else None)
+                if smaller:
+                    new_images[file_path] = smaller
+                    result["images"].append({"path": file_path, "old_kb": len(original) // 1024,
+                                             "new_kb": len(smaller) // 1024})
+    return result, new_images
+
+
 def create_pull_request(repo, fixes, page_url, perf_items):
     repo = parse_repo(repo)
     base_branch = github("GET", f"/repos/{repo}")["default_branch"]
@@ -143,41 +182,9 @@ def create_pull_request(repo, fixes, page_url, perf_items):
     for file_path in candidates:
         files[file_path] = {"text": download(file_path).decode("utf-8"), "changed": False}
 
-    result = {"pr_url": None, "applied": [], "skipped": [], "images": [], "attributes": []}
-
-    # Step 1: the AI's SEO text fixes.
-    for fix in fixes:
-        if not fix.get("find"):
-            result["skipped"].append((fix, "Needs a manual change."))
-            continue
-        file_path = replace_once_in_repo(files, fix["find"], fix["replace"])
-        if file_path:
-            result["applied"].append((fix, file_path))
-        else:
-            result["skipped"].append((fix, "Text not found exactly once in the repo."))
-
-    # Step 2: performance attributes and image files.
     image_paths = [p for p in blobs if p.lower().endswith(IMAGE_EXTENSIONS) and blobs[p].get("size", 0) < 25_000_000]
-    new_images = {}
-    for item in perf_items:
-        if urlparse(item["url"]).netloc != urlparse(page_url).netloc:
-            continue  # A third-party image is not necessarily an asset in this repo.
-        for flag, name, value in (("lazy", "loading", "lazy"), ("priority", "fetchpriority", "high")):
-            if item[flag] and item["src"]:
-                file_path = add_image_attribute(files, item["src"], name, value)
-                if file_path:
-                    result["attributes"].append(f'{name}="{value}" on {item["src"]} in {file_path}')
-        if item["oversized"] or item["heavy"]:
-            file_path = repo_path_for(item["url"], image_paths)
-            if file_path and file_path not in new_images:
-                original = download(file_path)
-                # Resize only an image this page alone uses; another page may show it larger.
-                used_once = sum(f["text"].count(file_path.rsplit("/", 1)[-1]) for f in files.values()) == 1
-                smaller = optimize_image(original, item["needed_width"] if item["oversized"] and used_once else None)
-                if smaller:
-                    new_images[file_path] = smaller
-                    result["images"].append({"path": file_path, "old_kb": len(original) // 1024,
-                                             "new_kb": len(smaller) // 1024})
+    result, new_images = apply_changes(files, image_paths, download, fixes, page_url, perf_items)
+    result["pr_url"] = None
 
     changed = {p: f["text"].encode("utf-8") for p, f in files.items() if f["changed"]}
     changed.update(new_images)
@@ -206,7 +213,7 @@ def create_pull_request(repo, fixes, page_url, perf_items):
     if result["images"] or result["attributes"]:
         body.append("### Proposed performance changes (visual review required)\n")
         body += [f"- `{i['path']}`: {i['old_kb']} KB to {i['new_kb']} KB" for i in result["images"]]
-        body += [f"- Added {a}" for a in result["attributes"]]
+        body += [f"- Added {a} in {p}" for a, p in result["attributes"]]
     pr = github("POST", f"/repos/{repo}/pulls", json={
         "title": f"SEO and performance fixes ({len(result['applied'])} text, {len(result['images'])} images)",
         "head": branch, "base": base_branch, "body": "\n".join(body), "draft": True,

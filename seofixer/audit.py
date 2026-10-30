@@ -61,15 +61,20 @@ def validate_url(url):
     return url
 
 
-def fetch_page(url):
-    """Render the page, measure images at two widths, and take a screenshot."""
+def fetch_page(url, trusted_origin=None):
+    """Render the page, measure images at two widths, and take a screenshot.
+
+    trusted_origin is the CLI's own local preview server: the only private address allowed."""
     from playwright.sync_api import Error, sync_playwright
-    validate_url(url)
+    trusted = lambda u: bool(trusted_origin) and u.startswith(trusted_origin)
+    if not trusted(url):
+        validate_url(url)
     image_bytes = {}
 
     def allow_public_request(route):
         try:
-            validate_url(route.request.url)
+            if not trusted(route.request.url):
+                validate_url(route.request.url)
             # Do not follow redirects inside fetch: the browser routes each next URL.
             response = route.fetch(max_redirects=0, timeout=30000)
         except (ValueError, Error):  # a blocked or broken file must not stall the whole page
