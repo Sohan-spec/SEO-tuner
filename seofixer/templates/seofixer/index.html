@@ -128,8 +128,8 @@
             <pre class="new">{{ fix.replace }}</pre>
           {% endif %}
           {% if fix.source %}
-            <!-- nosemgrep: generic.html-templates.security.var-in-href.var-in-href -- reason: ai.validate_report accepts only source URLs retrieved from the indexed Google documentation; form submissions cannot supply them. -->
-            <a href="{{ fix.source }}" target="_blank" rel="noopener">Google guidance</a>
+            <!-- nosemgrep: generic.html-templates.security.var-in-href.var-in-href -- reason: ai.validate_report accepts only source URLs retrieved from the indexed Google documentation or https web search results on settings.WEB_SEARCH_DOMAINS; form submissions cannot supply them. -->
+            <a href="{{ fix.source }}" target="_blank" rel="noopener">Guidance source</a>
           {% else %}
             <p class="note">No retrieved citation verified; manual review needed.</p>
           {% endif %}

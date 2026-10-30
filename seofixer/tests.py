@@ -40,7 +40,7 @@ def fix(find='Bikes for students', replace='Student bicycle repairs'):
 
 def model_reply(name, data):
     return SimpleNamespace(content=[SimpleNamespace(type='tool_use', name=name, input=data, id='tool_1')],
-                           usage=SimpleNamespace(input_tokens=20, output_tokens=10))
+                           stop_reason='tool_use', usage=SimpleNamespace(input_tokens=20, output_tokens=10))
 
 
 class ParsingTests(SimpleTestCase):
@@ -140,6 +140,50 @@ class AgentTests(SimpleTestCase):
         self.assertEqual(result['fixes'][0]['find'], '')
         with self.assertRaises(ValueError):
             ai.validate_report({'score': 500, 'summary': 'Bad.', 'fixes': []}, {SOURCE}, self.page)
+        result = ai.validate_report({'score': 70, 'summary': 'Review.', 'fixes': [{'issue': 'partial'}, fix()]}, {SOURCE}, self.page)
+        self.assertEqual([f['issue'] for f in result['fixes']], ['Improve the title'])
+
+    @override_settings(ANTHROPIC_API_KEY='test')
+    @patch('seofixer.ai.search_guidelines', return_value=[])
+    @patch('anthropic.Anthropic')
+    def test_web_results_become_citations_and_paused_searches_resume(self, anthropic, search):
+        web = 'https://web.dev/articles/title'
+        found = SimpleNamespace(type='web_search_tool_result',
+                                content=[SimpleNamespace(url=web), SimpleNamespace(url='javascript:alert(1)')])
+        paused = SimpleNamespace(content=[found], stop_reason='pause_turn', usage=SimpleNamespace(input_tokens=20, output_tokens=10))
+        fixes = [{**fix(), 'source': web}, {**fix(find='', replace=''), 'source': 'javascript:alert(1)'}]
+        create = anthropic.return_value.messages.create
+        create.side_effect = [
+            model_reply('search_seo_guidelines', {'query': ''}),  # bad query gets an error result, not a crash
+            model_reply('search_seo_guidelines', {'query': 'titles'}),
+            paused,
+            model_reply('submit_report', {'score': 80, 'summary': 'Improve the title.', 'fixes': fixes}),
+        ]
+        with override_settings(AGENT_MAX_TURNS=4):
+            report, usage = ai.run_agent(prompts.SPECIALISTS[0], self.page, [])
+        self.assertEqual([(f['source'], f['find']) for f in report['fixes']], [(web, 'Bikes for students'), ('', '')])
+        self.assertTrue(create.call_args_list[0].kwargs['tools'][-1]['type'].startswith('web_search'))
+        self.assertTrue(create.call_args_list[1].kwargs['messages'][2]['content'][0]['is_error'])
+        self.assertEqual(create.call_args_list[3].kwargs['tool_choice'], {'type': 'auto'})  # resume did not use up a turn
+        self.assertEqual([m['role'] for m in create.call_args_list[3].kwargs['messages']][-2:], ['assistant', 'assistant'])
+
+    @override_settings(ANTHROPIC_API_KEY='test')
+    @patch('seofixer.ai.search_guidelines', return_value=[{'source': SOURCE, 'text': 'Write descriptive titles.'}])
+    @patch('anthropic.Anthropic')
+    def test_rejected_web_search_falls_back_to_knowledge_base(self, anthropic, search):
+        import anthropic as sdk
+        rejected = sdk.BadRequestError('web search is disabled', response=Mock(status_code=400, headers={}), body=None)
+        create = anthropic.return_value.messages.create
+        create.side_effect = [
+            rejected,
+            model_reply('search_seo_guidelines', {'query': 'titles'}),
+            model_reply('submit_report', {'score': 80, 'summary': 'Improve the title.', 'fixes': [fix()]}),
+        ]
+        with self.assertLogs('seofixer.ai', level='WARNING'):
+            report, usage = ai.run_agent(prompts.SPECIALISTS[0], self.page, [])
+        self.assertEqual(create.call_args_list[1].kwargs['tools'], prompts.TOOLS)
+        self.assertEqual(report['fixes'][0]['source'], SOURCE)
+        self.assertEqual(usage['turns'], 2)
 
     @override_settings(ANTHROPIC_API_KEY='test')
     @patch('seofixer.ai.get_collection')

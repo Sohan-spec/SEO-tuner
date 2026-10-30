@@ -52,10 +52,10 @@ ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '')
 GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
 PAGESPEED_API_KEY = os.getenv('PAGESPEED_API_KEY', '')
 LLM_MODEL = os.getenv('LLM_MODEL', 'claude-haiku-5-5')
-LLM_MAX_TOKENS = 4000
+LLM_MAX_TOKENS = 400000
 AGENT_MAX_TURNS = 3
 MAX_FIXES = 10
-MAX_BODY_CHARS = 5000
+MAX_BODY_CHARS = 50000
 SEARCH_RESULTS = 3
 CHROMA_DIR = BASE_DIR / 'chroma_db'
 SCREENSHOT_DIR = BASE_DIR / 'screenshots'
@@ -76,3 +76,5 @@ SEO_SOURCES = [
     'https://developers.google.com/search/docs/crawling-indexing/mobile/mobile-sites-mobile-first-indexing',
     'https://developers.google.com/search/docs/essentials/spam-policies',
 ]
+# Agents may web search these sites (subdomains included) when the local guidance falls short.
+WEB_SEARCH_DOMAINS = ['developers.google.com', 'web.dev', 'schema.org', 'developer.mozilla.org', 'w3.org']

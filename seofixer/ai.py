@@ -90,12 +90,11 @@ def validate_report(report, sources, page_data):
     clean = []
     for fix in fixes[:4]:
         fields = ("issue", "severity", "why", "source", "find", "replace")
-        if not isinstance(fix, dict) or any(not isinstance(fix.get(k), str) for k in fields):
-            raise ValueError("The agent returned an incomplete fix.")
-        if fix["severity"] not in ("high", "medium", "low"):
-            raise ValueError("The agent returned an invalid priority.")
-        if any(len(fix[k]) > 4000 for k in fields):
-            raise ValueError("The agent returned an oversized fix.")
+        # Drop a malformed fix instead of losing the agent's whole report.
+        if (not isinstance(fix, dict) or any(not isinstance(fix.get(k), str) for k in fields)
+                or fix["severity"] not in ("high", "medium", "low")
+                or any(len(fix[k]) > 4000 for k in fields)):
+            continue
         fix = {key: fix[key] for key in fields}
         if fix["source"] not in sources:
             fix["source"] = ""
@@ -116,7 +115,7 @@ def validate_report(report, sources, page_data):
 def run_agent(specialist, page_data, issues):
     """Each specialist searches guidance, then submits a validated report."""
     import anthropic
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=45, max_retries=1)
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY, timeout=90, max_retries=1)
     page_slice = {field: page_data[field] for field in specialist["fields"]}
     if specialist["body_chars"]:
         page_slice["body_text"] = page_data["body_text"][:specialist["body_chars"]]
@@ -125,22 +124,40 @@ def run_agent(specialist, page_data, issues):
     messages = [{"role": "user", "content": json.dumps({"page": page_slice, "issues": my_issues})}]
     usage = {"input_tokens": 0, "output_tokens": 0, "turns": 0}
     sources, searches = set(), 0
+    tools = prompts.TOOLS + [prompts.WEB_SEARCH_TOOL]
+    turn = resumes = 0
 
-    for turn in range(settings.AGENT_MAX_TURNS):
+    while turn < settings.AGENT_MAX_TURNS:
         # Search first; force completion on the last turn.
         tool_choice = {"type": "auto"}
         if turn == 0:
             tool_choice = {"type": "tool", "name": "search_seo_guidelines"}
         elif turn == settings.AGENT_MAX_TURNS - 1:
             tool_choice = {"type": "tool", "name": "submit_report"}
-        response = client.messages.create(
-            model=settings.LLM_MODEL, max_tokens=settings.LLM_MAX_TOKENS,
-            system=system_prompt, tools=prompts.TOOLS, tool_choice=tool_choice, messages=messages,
-        )
+        try:
+            response = client.messages.create(
+                model=settings.LLM_MODEL, max_tokens=settings.LLM_MAX_TOKENS,
+                system=system_prompt, tools=tools, tool_choice=tool_choice, messages=messages,
+            )
+        except (anthropic.BadRequestError, anthropic.PermissionDeniedError):
+            if prompts.WEB_SEARCH_TOOL not in tools:
+                raise
+            # The organization may have web search switched off; the knowledge base still works.
+            logging.getLogger(__name__).warning("Web search was rejected; retrying without it.", exc_info=True)
+            tools = prompts.TOOLS
+            continue
         usage["input_tokens"] += response.usage.input_tokens
         usage["output_tokens"] += response.usage.output_tokens
         usage["turns"] += 1
         messages.append({"role": "assistant", "content": response.content})
+        for block in response.content:
+            # Web results are real URLs, so they become valid citations (https only: they render as links).
+            if block.type == "web_search_tool_result" and isinstance(block.content, list):
+                sources.update(r.url for r in block.content if r.url.startswith("https://"))
+        if response.stop_reason == "pause_turn" and resumes < 2:
+            resumes += 1
+            continue  # A long web search paused; sending the turn back resumes it.
+        turn += 1
         tool_results = []
         for block in response.content:
             if block.type != "tool_use":
@@ -149,11 +166,12 @@ def run_agent(specialist, page_data, issues):
                 if not searches:
                     raise ValueError("The agent did not search the knowledge base.")
                 return validate_report(block.input, sources, page_data), usage
-            if block.name != "search_seo_guidelines":
-                raise ValueError("The agent requested an unknown tool.")
             query = block.input.get("query")
-            if not isinstance(query, str) or not query.strip():
-                raise ValueError("The agent returned an invalid search query.")
+            if block.name != "search_seo_guidelines" or not isinstance(query, str) or not query.strip():
+                # Let the agent correct itself instead of failing the whole report.
+                tool_results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": True,
+                                     "content": "Unknown tool or empty query."})
+                continue
             passages = search_guidelines(query[:500]) if searches < 3 else []
             searches += 1
             sources.update(p["source"] for p in passages)

@@ -45,6 +45,7 @@ Never remove noindex or change canonical targets without the owner's decision; e
 Work in this order:
 1. Decide which issues in your area matter most, including ones the rule checks did not catch.
 2. Look up guidance with search_seo_guidelines. Make ALL your searches in a single turn by calling the tool several times at once, one short query per topic, at most 3 searches in total.
+   If those excerpts do not cover an issue, use web_search for official guidance (at most 2 searches).
 3. Call submit_report once, with at most 4 fixes for your area, most important first. Report nothing outside your area.
 
 Rules for each fix:
@@ -53,7 +54,7 @@ Rules for each fix:
 - Missing image alt text: find src="<exact src>" and replace with src="<exact src>" alt="<short description>".
 - Missing tag in <head> (for example a meta description): find </title> and replace with </title> followed by the new tag.
 - If a fix cannot be written as find/replace, leave both empty and explain what to do in "why".
-- "source" must be a URL that appeared in search results, or an empty string.
+- "source" must be a URL that appeared in search_seo_guidelines or web_search results, or an empty string.
 - Never suggest keyword stuffing or anything against Google's spam policies."""
 
 
@@ -95,6 +96,10 @@ TOOLS = [
         },
     },
 ]
+
+# Runs on Anthropic's servers; results arrive in the same response. Haiku uses this basic version.
+WEB_SEARCH_TOOL = {"type": "web_search_20250305", "name": "web_search", "max_uses": 2,
+                   "allowed_domains": settings.WEB_SEARCH_DOMAINS}
 
 SYSTEM_PROMPT = "You are the {name}. Focus on {focus}.\n" + FIX_RULES
 REPORT_REMINDER = "Submit your report now."
